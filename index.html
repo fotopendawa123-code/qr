@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi Image to QR Code Generator (Anti-Gagal)</title>
+    <title>Multi Image to QR Code Generator</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
@@ -11,15 +11,15 @@
 
     <div class="max-w-4xl mx-auto">
         <div class="bg-white p-6 md:p-8 rounded-2xl shadow-lg text-center mb-6">
-            <h1 class="text-3xl font-bold text-gray-800 mb-2">Multi Image to QR Code v2</h1>
-            <p class="text-gray-500 text-sm mb-6">Unggah banyak gambar sekaligus. Tanpa API Key, tanpa batasan jumlah file.</p>
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">Multi Image to QR Code</h1>
+            <p class="text-gray-500 text-sm mb-6">Unggah banyak gambar sekaligus tanpa batasan jumlah dan ukuran file.</p>
 
             <div class="border-2 border-dashed border-gray-300 rounded-xl p-8 hover:border-blue-500 transition cursor-pointer relative" id="drop-zone">
                 <input type="file" id="file-input" accept="image/*" multiple class="absolute inset-0 opacity-0 cursor-pointer">
                 <div>
                     <svg class="w-12 h-12 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                     <p class="text-sm text-gray-600 font-medium">Klik atau seret beberapa gambar ke sini sekaligus</p>
-                    <p class="text-xs text-gray-400 mt-1">Sistem otomatis memproses antrean file</p>
+                    <p class="text-xs text-gray-400 mt-1">Bisa pilih banyak file sekaligus</p>
                 </div>
             </div>
         </div>
@@ -31,6 +31,10 @@
         const fileInput = document.getElementById('file-input');
         const dropZone = document.getElementById('drop-zone');
         const resultsContainer = document.getElementById('results-container');
+
+        // PENTING: Jika gagal upload, buatlah API Key gratis milikmu sendiri di https://api.imgbb.com/
+        // Lalu ganti kode di bawah ini dengan API key barumu.
+        const IMGBB_API_KEY = '5a6fa58df34ea2774db8ea7bb7dfdc9a'; 
 
         // Efek Drag & Drop
         ['dragenter', 'dragover'].forEach(eventName => {
@@ -46,27 +50,108 @@
             const files = e.target.files;
             if (!files || files.length === 0) return;
 
+            // Proses semua file yang dipilih satu per satu
             Array.from(files).forEach((file, index) => {
                 createCardAndUpload(file, index);
             });
 
-            fileInput.value = ''; // Reset
+            // Reset input agar bisa memilih file yang sama lagi jika mau
+            fileInput.value = '';
         }
 
         function createCardAndUpload(file, index) {
             const cardId = `card-${Date.now()}-${index}`;
             
+            // 1. Buat elemen UI (Card) untuk gambar ini terlebih dahulu (Status: Loading)
             const cardHTML = `
                 <div id="${cardId}" class="bg-white p-5 rounded-xl shadow-md border border-gray-200 flex flex-col items-center justify-between text-center">
                     <div class="w-full flex items-center justify-between border-b border-gray-100 pb-2 mb-4">
                         <span class="text-xs font-semibold text-gray-500 truncate max-w-[150px]">${file.name}</span>
-                        <span id="${cardId}-status" class="text-xs text-blue-600 font-medium animate-pulse">Mengunggah ke Server...</span>
+                        <span id="${cardId}-status" class="text-xs text-blue-600 font-medium animate-pulse">Mengunggah...</span>
                     </div>
                     
                     <img id="${cardId}-preview" class="max-h-32 object-contain rounded mb-4" src="" alt="Preview">
-                    <div id="${cardId}-qrcode" class="bg-white p-3 rounded-lg border border-gray-100 hidden"></div>
+                    
+                    <div id="${cardId}-qrcode" class="bg-gray-50 p-3 rounded-lg border border-gray-100 hidden"></div>
+                    
                     <p id="${cardId}-error" class="text-xs text-red-500 hidden font-medium bg-red-50 p-2 rounded w-full"></p>
 
-                    <button id="${cardId}-download" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-medium py-1.5 px-4 rounded-lg transition text-xs w-full hidden">
+                    <button id="${cardId}-download" class="mt-4 bg-green-600 hover:bg-green-700 text-white font-medium py-1.5 px-4 rounded-lg transition text-xs w-full hidden">
                         Unduh QR
-                    </button
+                    </button>
+                </div>
+            `;
+            
+            resultsContainer.insertAdjacentHTML('afterbegin', cardHTML);
+
+            // Tampilkan preview gambar lokal sebelum diupload
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById(`${cardId}-preview`).src = e.target.result;
+            }
+            reader.readAsDataURL(file);
+
+            // 2. Jalankan proses Upload ke API
+            uploadProcess(file, cardId);
+        }
+
+        async function uploadProcess(file, cardId) {
+            const statusElem = document.getElementById(`${cardId}-status`);
+            const qrcodeElem = document.getElementById(`${cardId}-qrcode`);
+            const errorElem = document.getElementById(`${cardId}-error`);
+            const downloadBtn = document.getElementById(`${cardId}-download`);
+
+            const formData = new FormData();
+            formData.append('image', file);
+
+            try {
+                const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    const directUrl = data.data.url;
+                    
+                    // Sembunyikan status loading, tampilkan QR code
+                    statusElem.innerText = "Selesai";
+                    statusElem.classList.remove('text-blue-600', 'animate-pulse');
+                    statusElem.classList.add('text-green-600');
+                    qrcodeElem.classList.remove('hidden');
+                    downloadBtn.classList.remove('hidden');
+
+                    // Generate QR Code
+                    const qr = new QRCode(qrcodeElem, {
+                        text: directUrl,
+                        width: 150,
+                        height: 150,
+                        correctLevel: QRCode.CorrectLevel.H
+                    });
+
+                    // Setup fungsi download tombol
+                    downloadBtn.addEventListener('click', () => {
+                        const img = qrcodeElem.querySelector('img');
+                        const link = document.createElement('a');
+                        link.href = img ? img.src : qrcodeElem.querySelector('canvas').toDataURL("image/png");
+                        link.download = `QR-${file.name}.png`;
+                        link.click();
+                    });
+
+                } else {
+                    throw new Error(data.error ? data.error.message : 'Gagal dari server hosting.');
+                }
+            } catch (error) {
+                console.error(error);
+                statusElem.innerText = "Gagal";
+                statusElem.classList.remove('text-blue-600', 'animate-pulse');
+                statusElem.classList.add('text-red-600');
+                
+                errorElem.classList.remove('hidden');
+                errorElem.innerText = `Error: API Key limit/gagal. Silakan buat API Key sendiri di api.imgbb.com`;
+            }
+        }
+    </script>
+</body>
+</html>
